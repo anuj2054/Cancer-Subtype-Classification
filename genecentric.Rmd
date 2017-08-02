@@ -1,0 +1,192 @@
+---
+title: "R Notebook: A sample problem solved for GeneCentric"
+author: "Anuj Guruacharya"
+date: "May 28,2017"
+output:
+  html_notebook: default
+  html_document: default
+  pdf_document: default
+  word_document: default
+---
+
+Copyright: Anuj Guruacharya
+Date: May 28,2017
+Prepared as a sample problem for Dr. Hawazin Faruki
+
+On Saturday, I looked at the work sample for an hour. I didnt write any code but just pondered upon the questions, and planned out what needed to be done.
+
+On Sunday, I began work at around 3 pm and finished at around 11 pm . I took a dinner break of about an hour or more in between. 
+
+So in total I spent about 1 hour planning, and about 8 hours completing the task.
+
+The code has been written in R and I have used the R notebook which makes sharing code and data very easy. I have also made the code as general as possible so that there doesnt need to be much changes, if we would like to use a different dataset or a different set of genes.
+
+The first problem is to arrange and manage the data according to our needs from a public database including changing the variable names.
+
+The second problem is given of a set of expression levels of tumor samples from which we need to classify the different tumor samples into one of the 3 cancer subtypes: squamous, bronchioid, magnoid.
+
+The third problem is to find if the T Cell signature of the 3 cancer subtypes are significantly different from each other or not. 
+
+These approaches facilitates us in finding biomarkers of cancer which can be used for genotyping in later studies using simpler technologies such as microarrays.
+
+##Answer 1
+The data was downloaded according to the instructions in the document.
+
+```{r results="hide"}
+#importing the sample data set
+install.packages(readr)
+install.packages(dplyr)
+library(readr)
+library(dplyr)
+mydata1 <- read_delim("~/Anuj/GenecentricSample/LUAD.rnaseqv2__illuminahiseq_rnaseqv2__unc_edu__Level_3__RSEM_genes_normalized__data.data.txt", "\t", escape_double = FALSE, trim_ws = TRUE)
+dplyr::glimpse(mydata1)
+```
+
+```{r}
+#selecting only the solid tumor samples
+mydata2 <- mydata1[-1,]
+mydata3<-mydata2[,c("Hybridization REF",colnames(mydata2)[grep("01",substr(colnames(mydata2),14,15))])]
+paste("The number of solid tumor samples",ncol(mydata3)-1)
+#dplyr::glimpse(mydata3)
+```
+
+```{r}
+#changing the expression matrix to log
+mydata4 <- mydata3
+mydata4[-1] <- log2(data.matrix(mydata3[-1])+1)
+#getting a cleaner gene list for the data frame by removing everything after pipe operator
+mydata4$`Hybridization REF`<- sub("\\|.*","",mydata4$`Hybridization REF`)
+colnames(mydata4)[1] <- "genes"
+print("A sample of the data that was formatted according to our need")
+print(mydata4[50:60,1:10])
+```
+
+##Answer 2 
+
+```{r}
+#importing the predictor centroids file and replacing the first coloumn with the name "gene"
+centroids <- read_csv("~/Anuj/GenecentricSample/wilkerson.2012.LAD.predictor.centroids.csv")
+colnames(centroids)[1] <- "genes"
+dplyr::glimpse(centroids)
+
+#to find sample data genes that are present in both
+SampleDataWithOnlySubtyperGenes<-dplyr::semi_join(mydata4, centroids)
+paste("The following is list of gene present in both",SampleDataWithOnlySubtyperGenes$genes)
+dplyr::glimpse(SampleDataWithOnlySubtyperGenes)
+
+#Report the centroid genes not in the sample data.
+CentroidsNotInSampleData <- dplyr::anti_join(centroids,mydata4)
+```
+
+```{r}
+print("Out of the 506 Centroid Genes, the following is not in the TCGA dataset")
+print(CentroidsNotInSampleData$genes)
+```
+
+```{r results="hide"}
+#to find centroid genes that are in the sample data
+CentroidInSampleData<-dplyr::semi_join(centroids, mydata4)
+#CentroidInSampleData$genes
+dplyr::glimpse(CentroidInSampleData)
+
+#centering a row using median
+rowmed <- apply(SampleDataWithOnlySubtyperGenes[-1],1,median)
+SampleDataCenteredUsingMedian <- SampleDataWithOnlySubtyperGenes
+SampleDataCenteredUsingMedian[-1] <- SampleDataWithOnlySubtyperGenes[-1] - rowmed
+dplyr::glimpse(SampleDataCenteredUsingMedian)
+
+#calculating the peasron correlation coefficient between each sample and each centroid
+corrmatrix<-cor(SampleDataCenteredUsingMedian[-1], CentroidInSampleData[-1], method="pearson")
+
+#determining which centroid each sampleID is closest to
+distanceMatrix<-sqrt((1-corrmatrix))
+distanceTable<- data.frame(SampleID = row.names(distanceMatrix), distanceMatrix)
+rowmin <- apply(distanceMatrix,1,min)
+SampleDataWithBronchioid<-dplyr::filter(distanceTable,bronchioid==rowmin)
+SampleDataWithMagnoid<-dplyr::filter(distanceTable,magnoid==rowmin)
+SampleDataWithSquamoid<-dplyr::filter(distanceTable,squamoid==rowmin)
+```
+The results are output to three csv files named SamplesWithBronchioid.csv, SamplesWithMagnoid.csv, SamplesWithSquamoid.csv
+```{r}
+#Report the IDS by printing the answers to a csv files named SamplesWithBronchioid.csv, SamplesWithMagnoid.csv, SamplesWithSquamoid.csv
+SampleIDWithBronchioid<-as.character(SampleDataWithBronchioid$SampleID)
+SampleIDWithMagnoid<-as.character(SampleDataWithMagnoid$SampleID)
+SampleIDWithSquamoid<-as.character(SampleDataWithSquamoid$SampleID)
+write.csv(SampleDataWithBronchioid$SampleID,"SamplesWithBronchioid.csv")
+write.csv(SampleDataWithMagnoid$SampleID,"SamplesWithMagnoid.csv")
+write.csv(SampleDataWithSquamoid$SampleID,"SamplesWithSquamoid.csv")
+```
+
+```{r}
+#drawing a heatmap just for fun
+paste("This is a heatmap of the expression levels of the SubtyperGenes")
+paste("Added just for the fun of it")
+heatmap(distanceMatrix, symm = FALSE)
+```
+
+##Answer 3
+
+```{r results="hide"}
+
+#extracting only the sample data genes that have the T Cell Genes
+TCellGenes <- data.frame(genes=c("PRKCQ","CD3D","CD3G", "CD28", "LCK", "TRAT1", "BCL11B", "CD2", "TRBC1", "TRAC", "ITM2A", "SH2D1A", "CD6", "CD96", "NCALD", "GIMAP5", "TRA", "CD3E", "SKAP1"))
+SampleDataWithOnlyTCellGenes<-dplyr::semi_join(mydata4, TCellGenes)
+dplyr::glimpse(SampleDataWithOnlyTCellGenes)
+
+#Reporting genes in signature that are not used because they are not in TCGA
+TCellGenesNotInSampleData <- dplyr::anti_join(TCellGenes,SampleDataWithOnlyTCellGenes)
+```
+```{r}
+print("The T Cell genes that are not present in the TCGA are as follows: ")
+print(as.character(TCellGenesNotInSampleData$genes))
+```
+
+```{r}
+# Finding the T Cell Signature of each of the sample as the average expression level across all the T Cell genes ::; This is not needed, but I did it anyway
+SampleDataWithTCellGenesAndSignature <- SampleDataWithOnlyTCellGenes
+SampleDataWithTCellGenesAndSignature[nrow(SampleDataWithTCellGenesAndSignature)+1,] <- c("TCellSignature",apply(SampleDataWithOnlyTCellGenes[-1],2,mean))
+dplyr::glimpse(SampleDataWithTCellGenesAndSignature)
+
+#Finding the TCell for each of the samples
+SampleDataWithTCellSignature<-data.frame(apply(SampleDataWithOnlyTCellGenes[-1],2,mean))
+dplyr::glimpse(SampleDataWithTCellSignature)
+
+#Extracting TCell Genes and signature for the three cancer subtypes ::: Method 1 
+SampleDataWithBronchioidAndTCellGenesAndSignature<-dplyr::select(SampleDataWithTCellGenesAndSignature, genes, dplyr::one_of(SampleIDWithBronchioid))
+SampleDataWithMagnoidAndTCellGenesAndSignature<-dplyr::select(SampleDataWithTCellGenesAndSignature, genes, dplyr::one_of(SampleIDWithMagnoid))
+SampleDataWithSquamoidAndTCellGenesAndSignature<-dplyr::select(SampleDataWithTCellGenesAndSignature, genes, dplyr::one_of(SampleIDWithSquamoid))
+
+#Extracting only the Tcell signature for each of the cancer subtypes :: Method 2
+SampleDataWithBronchioidAndTCellSignature <- dplyr::filter(SampleDataWithTCellSignature, rownames(SampleDataWithTCellSignature) %in% SampleIDWithBronchioid)
+SampleDataWithMagnoidAndTCellSignature <- dplyr::filter(SampleDataWithTCellSignature, rownames(SampleDataWithTCellSignature) %in% SampleIDWithMagnoid)
+SampleDataWithSquamoidAndTCellSignature <- dplyr::filter(SampleDataWithTCellSignature, rownames(SampleDataWithTCellSignature) %in% SampleIDWithSquamoid)
+```
+
+```{r}
+#boxplot of the TCell Signatures for each of the cancer subtypes
+TCellSignatureForAllCancerSubtypes <- c(SampleDataWithBronchioidAndTCellSignature,SampleDataWithMagnoidAndTCellSignature,SampleDataWithSquamoidAndTCellSignature)
+names(TCellSignatureForAllCancerSubtypes) <-c("bronchioid","magnoid","squamoid")
+boxplot(TCellSignatureForAllCancerSubtypes, main="T Cell Signature for different Cancer subtypes", xlab="Type of Cancer", ylab="T Cell Signature")
+```
+
+If you have to perform the comparison between multiple groups, but you can not run a ANOVA for multiple comparisons because the groups do not follow a normal distribution, you can use the Kruskal-Wallis test, which can be applied when you can not make the assumption that the groups follow a gaussian distribution.
+
+```{r}
+#Kruskal-Wallis Test
+kruskal.test(TCellSignatureForAllCancerSubtypes)
+
+#Reporting the p values 
+paste("The P value of the Kruskal Wallis test is", kruskal.test(TCellSignatureForAllCancerSubtypes)$p.value)
+```
+
+The value of the test statistic is 30.546. It is higher than the chi-square-tabulation: 5.991465
+```{r}
+qchisq(0.950, 2)
+```
+
+The p-value is less than 0.05.
+The conclusion is therefore that I reject the null hypothesis H0: the means of the 3 groups of cancer are statistically equal.
+
+So the mean of T Cell Signatures of the 3 groups of cancer subtypes are statistically different.
+
+
